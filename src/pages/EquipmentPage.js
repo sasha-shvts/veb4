@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useRef } from "react";
 import Flatpickr from "react-flatpickr";
-import equipmentData from "../data/equipmentData";
 import Toast from "../components/Toast";
+import { collection, getDocs, addDoc } from "firebase/firestore";
+import { db } from "../firebase";
 
 function normalizeDate(dateStr) {
   const date = new Date(`${dateStr}T00:00:00`);
@@ -25,16 +26,13 @@ function calculateDaysAndPrice(rental) {
   return { days, totalPrice };
 }
 
-function EquipmentPage() {
-  // Список обладнання для показу
+function EquipmentPage({ user }) {
   const [equipment, setEquipment] = useState([]);
 
-  // Кошик оренди
   const [cart, setCart] = useState(() => {
     return JSON.parse(localStorage.getItem("rentCart")) || [];
   });
 
-  // Окремий кошик для оплати
   const [paymentCart, setPaymentCart] = useState(() => {
     return JSON.parse(localStorage.getItem("rentPaymentCart")) || [];
   });
@@ -44,35 +42,42 @@ function EquipmentPage() {
   });
 
   const [filter, setFilter] = useState("Всі");
-
   const [message, setMessage] = useState("");
-
   const [addedId, setAddedId] = useState(null);
 
-  // Коментарі користувачів
   const [comments, setComments] = useState(() => {
     return JSON.parse(localStorage.getItem("comments")) || [];
   });
 
-  // Поля форми коментаря
   const [form, setForm] = useState({
     name: "",
     email: "",
     comment: "",
   });
 
-  // Toast-сповіщення
   const [toastVisible, setToastVisible] = useState(false);
   const [toastMessage, setToastMessage] = useState("");
 
-  // Додаткова інформація
   const [showExtraInfo, setShowExtraInfo] = useState(false);
   const [selectedCategory, setSelectedCategory] = useState(null);
 
-  const pickersRef = useRef({}); // Ref для збереження екземплярів Flatpickr для кожного товару
+  const pickersRef = useRef({});
 
   useEffect(() => {
-    setEquipment(equipmentData);
+    const fetchEquipment = async () => {
+      try {
+        const snapshot = await getDocs(collection(db, "equipment"));
+        const list = snapshot.docs.map((doc) => ({
+          id: doc.id,
+          ...doc.data(),
+        }));
+        setEquipment(list);
+      } catch (err) {
+        console.error("Помилка завантаження equipment з Firestore:", err);
+      }
+    };
+
+    fetchEquipment();
   }, []);
 
   useEffect(() => {
@@ -96,8 +101,12 @@ function EquipmentPage() {
       ? equipment
       : equipment.filter((item) => item.sportType === filter);
 
-  // Додає оренду в кошик, статистику та paymentCart
-  const addRentForItem = (item, title, startStr, endStr) => {
+  const addRentForItem = async (item, title, startStr, endStr) => {
+    if (!user) {
+      alert("Щоб оформити оренду, увійдіть в акаунт.");
+      return;
+    }
+
     const rentalEntry = {
       id: Date.now() + Math.random(),
       equipment: title,
@@ -119,7 +128,6 @@ function EquipmentPage() {
 
     setCart((prev) => [...prev, rentalEntry]);
 
-    // Статистика рахує, скільки разів брали цей товар в оренду
     const cleanTitle = item.name;
     setRentStats((prev) => ({
       ...prev,
@@ -142,10 +150,32 @@ function EquipmentPage() {
       setMessage("");
       setAddedId(null);
     }, 2000);
+
+    try {
+      await addDoc(collection(db, "rentals"), {
+        userId: user.uid,
+        userEmail: user.email,
+        equipment: title,
+        equipmentId: item.id || null,
+        start: startStr,
+        end: endStr,
+        days,
+        pricePerDay: item.price,
+        totalPrice,
+        img: item.img || null,
+        createdAt: new Date(),
+      });
+    } catch (err) {
+      console.error("Помилка запису оренди в Firestore:", err);
+    }
   };
 
-  // Відкриває прихований календар для вибраного товару
   const handleRentClick = (item) => {
+    if (!user) {
+      alert("Щоб оформити оренду, увійдіть в акаунт.");
+      return;
+    }
+
     const key = item.id || item.name;
     const pickerInstance = pickersRef.current[key];
 
@@ -154,7 +184,6 @@ function EquipmentPage() {
     }
   };
 
-  // Знаходимо найпопулярніший товар
   let popularName = null;
   let maxCount = 0;
 
@@ -165,7 +194,6 @@ function EquipmentPage() {
     }
   }
 
-  // Оновлення полів форми коментаря
   const handleFormChange = (e) => {
     const { id, value } = e.target;
 
@@ -174,7 +202,6 @@ function EquipmentPage() {
     if (id === "user-comment") setForm((prev) => ({ ...prev, comment: value }));
   };
 
-  // Додає новий коментар
   const handleCommentSubmit = (e) => {
     e.preventDefault();
 
@@ -195,7 +222,6 @@ function EquipmentPage() {
     setForm({ name: "", email: "", comment: "" });
   };
 
-  // Видаляє коментар після підтвердження
   const deleteComment = (id) => {
     if (!window.confirm("Ви впевнені, що хочете видалити цей коментар?")) return;
     setComments((prev) => prev.filter((c) => c.id !== id));
@@ -204,7 +230,6 @@ function EquipmentPage() {
   return (
     <>
       <main>
-        {/* Блок з додатковою інформацією */}
         <section className="extra-info">
           <h2>Додаткова інформація</h2>
 
@@ -225,7 +250,6 @@ function EquipmentPage() {
             </p>
           )}
 
-          {/* Кнопки категорій */}
           <div className="extra-info-chips">
             <button
               type="button"
@@ -272,7 +296,6 @@ function EquipmentPage() {
             </button>
           </div>
 
-          {/* Текст для вибраної категорії */}
           <div className="extra-info-details">
             {!selectedCategory && (
               <p>Натисніть на категорію, щоб побачити опис.</p>
@@ -322,7 +345,6 @@ function EquipmentPage() {
           </div>
         </section>
 
-        {/* Список обладнання */}
         <section>
           <h2>Обладнання</h2>
 
@@ -431,7 +453,6 @@ function EquipmentPage() {
           </div>
         </section>
 
-        {/* Коментарі */}
         <section>
           <h2>Коментарі</h2>
 

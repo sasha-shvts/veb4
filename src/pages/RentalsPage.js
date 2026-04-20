@@ -1,4 +1,13 @@
 import React, { useState, useEffect, useMemo } from "react";
+import {
+  collection,
+  getDocs,
+  query,
+  where,
+  deleteDoc,
+  doc,
+} from "firebase/firestore";
+import { db } from "../firebase";
 
 function normalizeDate(dateStr) {
   if (!dateStr) return new Date();
@@ -23,34 +32,49 @@ function calculateDaysAndPrice(rental) {
   return { days, totalPrice };
 }
 
-function getCart() {
-  try {
-    const raw = localStorage.getItem("rentCart");
-    const parsed = raw ? JSON.parse(raw) : [];
-    return Array.isArray(parsed) ? parsed : [];
-  } catch {
-    return [];
-  }
-}
-
-function saveCart(cart) {
-  localStorage.setItem("rentCart", JSON.stringify(cart));
-}
-
-function RentalsPage() {
-
-  const [cart, setCart] = useState(() => getCart());
+function RentalsPage({ user }) {
+  const [cart, setCart] = useState([]);
 
   useEffect(() => {
-    saveCart(cart);
-  }, [cart]);
+    const fetchUserRentals = async () => {
+      if (!user) return;
+
+      try {
+        const q = query(
+          collection(db, "rentals"),
+          where("userId", "==", user.uid)
+        );
+
+        const snapshot = await getDocs(q);
+
+        const rentalsFromDb = snapshot.docs.map((docSnap) => {
+          const data = docSnap.data();
+          return {
+            id: docSnap.id,
+            equipment: data.equipment,
+            price: data.pricePerDay,
+            start: data.start,
+            end: data.end,
+            img: data.img || null,
+            days: data.days,
+            totalPrice: data.totalPrice,
+          };
+        });
+
+        setCart(rentalsFromDb);
+      } catch (err) {
+        console.error("Помилка читання оренд з Firestore:", err);
+      }
+    };
+
+    fetchUserRentals();
+  }, [user]);
 
   const today = new Date();
   today.setHours(0, 0, 0, 0);
   const todayTime = today.getTime();
 
   const orderedCart = useMemo(() => {
-    // Розділяє оренди на активні та завершені.
     if (!cart.length) return [];
 
     const active = [];
@@ -71,13 +95,15 @@ function RentalsPage() {
     return [...active, ...finished];
   }, [cart, todayTime]);
 
-  const handleCancel = (rental) => {
-    // Скасовує оренду після підтвердження користувача.
+  const handleCancel = async (rental) => {
     if (!window.confirm("Скасувати оренду?")) return;
 
-    const newCart = cart.filter((r) => r.id !== rental.id);
-    setCart(newCart);
-    saveCart(newCart);
+    try {
+      await deleteDoc(doc(db, "rentals", rental.id));
+      setCart((prev) => prev.filter((r) => r.id !== rental.id));
+    } catch (err) {
+      console.error("Помилка видалення оренди:", err);
+    }
   };
 
   return (
@@ -91,8 +117,6 @@ function RentalsPage() {
 
         <div className="rentals-grid">
           {orderedCart.map((rental) => {
-            // Для кожної оренди визначаємо стиль, статус і суму.
-
             const equipmentName = rental.equipment || "";
             const nameLower = equipmentName.toLowerCase();
 
@@ -146,6 +170,7 @@ function RentalsPage() {
                 <p className="rental-date">
                   {rental.start || "—"} — {rental.end || "—"}
                 </p>
+
                 <p className="rental-meta">
                   {days} дн. • {totalPrice} грн
                 </p>

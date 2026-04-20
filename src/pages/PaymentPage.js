@@ -1,52 +1,74 @@
 import React, { useState, useEffect } from "react";
+import {
+  collection,
+  getDocs,
+  query,
+  where,
+  deleteDoc,
+  doc,
+} from "firebase/firestore";
+import { db } from "../firebase";
 
-function getPaymentCart() {
-  // Отримує кошик для оплати з localStorage.
-  try {
-    const raw = localStorage.getItem("rentPaymentCart");
-    const parsed = raw ? JSON.parse(raw) : [];
-    return Array.isArray(parsed) ? parsed : [];
-  } catch {
-    return [];
-  }
-}
-
-function savePaymentCart(cart) {
-  localStorage.setItem("rentPaymentCart", JSON.stringify(cart));
-}
-
-function PaymentPage() {
-
-  const [cartItems, setCartItems] = useState(() => getPaymentCart());
-
+function PaymentPage({ user }) {
+  const [cartItems, setCartItems] = useState([]);
   const [amount, setAmount] = useState(0);
-
   const [method, setMethod] = useState("card");
-
   const [cardNumber, setCardNumber] = useState("");
-
   const [cardName, setCardName] = useState("");
-
   const [cardExpiry, setCardExpiry] = useState("");
-
   const [cardCvv, setCardCvv] = useState("");
 
   useEffect(() => {
-    // Перераховує суму при зміні кошика та зберігає його в localStorage.
+    const fetchPaymentCart = async () => {
+      if (!user) return;
+
+      try {
+        const q = query(
+          collection(db, "rentals"),
+          where("userId", "==", user.uid)
+        );
+
+        const snapshot = await getDocs(q);
+
+        const rentalsFromDb = snapshot.docs.map((docSnap) => {
+          const data = docSnap.data();
+          return {
+            id: docSnap.id,
+            equipment: data.equipment,
+            days: data.days,
+            totalPrice: data.totalPrice,
+            start: data.start,
+            end: data.end,
+          };
+        });
+
+        setCartItems(rentalsFromDb);
+      } catch (err) {
+        console.error("Помилка завантаження кошика з Firestore:", err);
+      }
+    };
+
+    fetchPaymentCart();
+  }, [user]);
+
+  useEffect(() => {
     const sum = cartItems.reduce(
       (acc, item) => acc + (Number(item.totalPrice) || 0),
       0
     );
     setAmount(sum);
-    savePaymentCart(cartItems);
   }, [cartItems]);
 
-  const handleRemove = (id) => {
-    const newCart = cartItems.filter((i) => String(i.id) !== String(id));
-    setCartItems(newCart);
+  const handleRemove = async (id) => {
+    try {
+      await deleteDoc(doc(db, "rentals", id));
+      setCartItems((prev) => prev.filter((i) => String(i.id) !== String(id)));
+    } catch (err) {
+      console.error("Помилка видалення з кошика:", err);
+    }
   };
 
-  const handleSubmit = (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault();
 
     if (amount <= 0) {
@@ -54,19 +76,26 @@ function PaymentPage() {
       return;
     }
 
-    alert("Оплату успішно виконано!");
-    setCartItems([]);
-    savePaymentCart([]);
+    try {
+      for (const item of cartItems) {
+        await deleteDoc(doc(db, "rentals", item.id));
+      }
 
-    setCardNumber("");
-    setCardName("");
-    setCardExpiry("");
-    setCardCvv("");
+      alert("Оплату успішно виконано!");
+      setCartItems([]);
+
+      setCardNumber("");
+      setCardName("");
+      setCardExpiry("");
+      setCardCvv("");
+    } catch (err) {
+      console.error("Помилка під час оплати:", err);
+      alert("Не вдалося завершити оплату.");
+    }
   };
 
   return (
     <main>
-      {/* Блок кошика */}
       <div
         id="cart-summary"
         style={{
@@ -86,6 +115,7 @@ function PaymentPage() {
             <p key={item.id}>
               {item.equipment} — {item.days} дн. — {item.totalPrice} грн
               <button
+                type="button"
                 className="remove-btn"
                 style={{ marginLeft: 8 }}
                 onClick={() => handleRemove(item.id)}
@@ -101,7 +131,6 @@ function PaymentPage() {
         </p>
       </div>
 
-      {/* Форма оплати */}
       <section id="payment">
         <h2>Оплата</h2>
 

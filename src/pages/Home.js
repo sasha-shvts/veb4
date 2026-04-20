@@ -58,15 +58,8 @@ function HomePage() {
   const [cartCount, setCartCount] = useState(getCart().length);
 
   useEffect(() => {
-    fetch("/equipment-full.json")
-      .then((res) => res.json())
-      .then((data) => {
-        setEquipment(Array.isArray(data) ? data : []);
-      })
-      .catch(() => {
-        setEquipment([]);
-      })
-      .finally(() => setLoading(false));
+  setEquipment(equipmentData);
+  setLoading(false);
   }, []);
 
   useEffect(() => {
